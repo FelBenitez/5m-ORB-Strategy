@@ -135,7 +135,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Draw.Line(this, "BoxLow", 0, BoxLow, 5, BoxLow, Brushes.Red);
 			}
 			
-			
+			// to work on next
 			
 		}
 
