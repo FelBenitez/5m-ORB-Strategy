@@ -131,11 +131,11 @@ namespace NinjaTrader.NinjaScript.Strategies
 				BoxHeight = BoxHigh - BoxLow;
 				
 				// Now draw the horizontal lines on your chart
-				Draw.Line(this, "BoxHigh", 0, BoxHigh, 5, BoxHigh, Brushes.Red);
-				Draw.Line(this, "BoxLow", 0, BoxLow, 5, BoxLow, Brushes.Red);
+				Draw.HorizontalLine(this, "BoxHigh", BoxHigh, Brushes.Red, DashStyleHelper.Solid, 2, true);
+				Draw.HorizontalLine(this, "BoxLow", BoxLow, Brushes.Red, DashStyleHelper.Solid, 2, true);
 			}
 			
-			// to work on next
+			
 			
 		}
 
