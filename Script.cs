@@ -33,6 +33,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private bool SessionTradeTaken;
 		private DateTime SessionOpen;
 		private bool IsLondonSession;
+		private double PrevDayHigh, PrevDayLow;
 
 
 		protected override void OnStateChange()
@@ -77,11 +78,28 @@ namespace NinjaTrader.NinjaScript.Strategies
 			}
 			else if (State == State.Configure)
 			{
+				AddDataSeries(BarsPeriodType.Day, 1);
 			}
 		}
 
 		protected override void OnBarUpdate()
 		{
+			// Step 0, handle daily series
+			if(BarsInProgress == 1) 
+			{
+				if(CurrentBar > 1)
+				{
+					PrevDayHigh = Highs[1][1];
+					PrevDayLow  = Lows[1][1];
+            		RemoveDrawObject("PD_High");
+            		RemoveDrawObject("PD_Low");
+            		Draw.HorizontalLine(this, "PD_High", PrevDayHigh, Brushes.Blue, DashStyleHelper.Dash, 2, true);
+            		Draw.HorizontalLine(this, "PD_Low", PrevDayLow,  Brushes.Blue, DashStyleHelper.Dash, 2, true);
+				}
+				
+			}
+			
+			// Guard the 5-minute series
 			// Dont start any logic until you've got at least 20 bars
 			if (BarsInProgress != 0 || CurrentBar < BarsRequiredToTrade) 
 				return;
@@ -181,6 +199,47 @@ namespace NinjaTrader.NinjaScript.Strategies
                 }
                 Print("✔️ EMA alignment OK"); // EMA fit rules so continue
 				
+				
+				// Step 4, volume filter with alert
+				double volAvg = 0;
+				for (int i = 1; i <=5; i++) {
+					volAvg += Volume[i];
+				}
+				volAvg /= 5;
+				double volThresh = volAvg * (IsLondonSession ? VolMultiplierLon : VolMultiplierNY);
+				
+				if(Volume[0] < volThresh) 
+				{
+					Print($"⚠️ Low volume: {Volume[0]} vs threshold {volThresh:F0}");
+					Alert("LowVol", Priority.High, "Low volume breakout", "Alert2.wav", 0, Brushes.Orange, Brushes.Black);
+				}
+				
+				else 
+				{
+					Print($"✔️ Volume OK: {Volume[0]} vs {volThresh:F0}");
+				}
+				
+				
+				// Step 5, provide support/resistance context alert about previous day high/low
+				// Find target profit depending on if it's a long or short
+				double target = longBreakout ? Close[0] + Math.Min(BoxHeight * 2, 4) : Close[0] - Math.Min(BoxHeight * 2, 4);
+				
+				if(longBreakout && PrevDayHigh - target <= 2)
+				{
+					Print($"⚠️ TP {target:F2} within 2 of yesterday’s HIGH {PrevDayHigh:F2}");
+            		Alert("SRHigh", Priority.Medium, "TP near prior-day HIGH", "", 0, Brushes.Yellow, Brushes.Black);
+				}
+				
+				else if (shortBreakout && target - PrevDayLow <= 2)
+		        {
+		            Print($"⚠️ TP {target:F2} within 2 of yesterday’s LOW {PrevDayLow:F2}");
+		            Alert("SRLow", Priority.Medium, "TP near prior-day LOW",  "", 0, Brushes.Yellow, Brushes.Black);
+		        }
+		        else
+				{
+		            Print("✔️ Context OK");
+				}
+					
 				
 			}
 			
