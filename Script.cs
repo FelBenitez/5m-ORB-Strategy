@@ -97,11 +97,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Print("London open detected at " + now);
 				SessionOpen = now;
 				IsLondonSession = true;
-				SessionTradeTaken = false;
+				SessionTradeTaken = false; // So it resets in case it's still true from previous session
 				
 				// Clear any old drawings
 				BoxHigh = 0;
 				BoxLow = 0;
+				BoxHeight = 0;
 				RemoveDrawObject("BoxHigh");
 				RemoveDrawObject("BoxLow");
 			}
@@ -113,9 +114,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Print("New York open detected at " + now);
 				SessionOpen        = now;
 		        IsLondonSession    = false;
-		        SessionTradeTaken  = false;
+		        SessionTradeTaken  = false; // So it resets in case it's still true from previous session
 		        BoxHigh = 0;
 		        BoxLow  = 0;
+				BoxHeight = 0;
 		        RemoveDrawObject("BoxHigh");
 		        RemoveDrawObject("BoxLow");
 			}
@@ -128,13 +130,59 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Gets the high and low. High[int barsAgo]
 				BoxHigh = High[0];
 				BoxLow = Low[0];
-				BoxHeight = BoxHigh - BoxLow;
+				BoxHeight = BoxHigh - BoxLow; // Calculates box height only after 5-min candle has occurred
+				
+				Print($"Drawing ORB box at {now}  High={BoxHigh:F2} Low={BoxLow:F2}");
 				
 				// Now draw the horizontal lines on your chart
 				Draw.HorizontalLine(this, "BoxHigh", BoxHigh, Brushes.Red, DashStyleHelper.Solid, 2, true);
 				Draw.HorizontalLine(this, "BoxLow", BoxLow, Brushes.Red, DashStyleHelper.Solid, 2, true);
 			}
 			
+			// 3) Check if the candles meet the conditions for a valid breakout ONLY after first 5-min has been drawn out
+			if(!SessionTradeTaken && BoxHeight > 0) // If box height > 0 then it has already been drawn out
+			{
+				// Step 1, breakout detection. most efficient step first before checking for more.
+				bool longBreakout = Close[0] > BoxHigh;
+				bool shortBreakout = Close[0] < BoxLow;
+				if(longBreakout)
+					Print("Breakout LONG at " + now);
+				else if(shortBreakout)
+					Print("Breakout SHORT at " + now);
+				else
+					return; // to not continue any other logic since neither have happened. efficiency
+				
+				// Step 2, check if the box size is valid or else skip the trade
+				double minBox = IsLondonSession ? MinBoxLondon : MinBoxNewYork; // find min box required based on which session it is
+				if(BoxHeight < minBox || BoxHeight > MaxBox) 
+				{
+					Print($"✖️ BoxHeight {BoxHeight:F2} invalid (needs {minBox:F2}–{MaxBox:F2})");
+					return; // skip trade if box height is invalid
+				}
+				Print($"✔️ BoxHeight OK: {BoxHeight:F2}");
+				
+				// Step 3, confirm the EMAs
+				double ema9 = EMA(Closes[0], 9)[0];
+				double ema21 = EMA(Closes[0], 21)[0];
+				bool emaOKLong = Close[0] > ema9 && ema9 > ema21;
+				bool emaOKShort = Close[0] < ema9 && ema9 < ema21;
+				
+				// Skip trades if EMAs do not fit the rules
+				if(longBreakout && !emaOKLong) 
+				{
+					Print($"✖️ EMA misaligned LONG: Close={Close[0]:F2}, 9EMA={ema9:F2}, 21EMA={ema21:F2}");
+                    return;
+				}
+				
+				if (shortBreakout && !emaOKShort)
+                {
+                    Print($"✖️ EMA misaligned SHORT: Close={Close[0]:F2}, 9EMA={ema9:F2}, 21EMA={ema21:F2}");
+                    return;
+                }
+                Print("✔️ EMA alignment OK"); // EMA fit rules so continue
+				
+				
+			}
 			
 			
 		}
