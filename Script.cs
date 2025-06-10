@@ -20,6 +20,7 @@ using NinjaTrader.NinjaScript;
 using NinjaTrader.Core.FloatingPoint;
 using NinjaTrader.NinjaScript.Indicators;
 using NinjaTrader.NinjaScript.DrawingTools;
+using System.Windows;  // for MessageBox
 #endregion
 
 //This namespace holds Strategies in this folder and is required. Do not change it. 
@@ -84,7 +85,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 		protected override void OnBarUpdate()
 		{
-			// Step 0, handle daily series
+			// Step 0, handle daily series for prior H/L
 			if(BarsInProgress == 1) 
 			{
 				if(CurrentBar > 1)
@@ -96,7 +97,7 @@ namespace NinjaTrader.NinjaScript.Strategies
             		Draw.HorizontalLine(this, "PD_High", PrevDayHigh, Brushes.Blue, DashStyleHelper.Dash, 2, true);
             		Draw.HorizontalLine(this, "PD_Low", PrevDayLow,  Brushes.Blue, DashStyleHelper.Dash, 2, true);
 				}
-				
+				return;
 			}
 			
 			// Guard the 5-minute series
@@ -121,8 +122,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 				BoxHigh = 0;
 				BoxLow = 0;
 				BoxHeight = 0;
-				RemoveDrawObject("BoxHigh");
-				RemoveDrawObject("BoxLow");
+				// remove everything to clean up working space and prevent spam when backtesting
+        	foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
+            RemoveDrawObject(tag);
 			}
 			
 			
@@ -136,9 +138,30 @@ namespace NinjaTrader.NinjaScript.Strategies
 		        BoxHigh = 0;
 		        BoxLow  = 0;
 				BoxHeight = 0;
-		        RemoveDrawObject("BoxHigh");
-		        RemoveDrawObject("BoxLow");
+		        // remove everything to clean up working space and prevent spam when backtesting
+        		foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
+            	RemoveDrawObject(tag);
 			}
+			
+			
+			
+			// only run ORB logic between 5 min and 55 mins after session open. 
+			if(SessionOpen == default(DateTime) || now < SessionOpen.AddMinutes(5)) {
+				return;
+			}
+			
+			// define sessionEnd = open + 55 min
+		    DateTime sessionEnd = SessionOpen.AddMinutes(55);
+		
+		    // Clear stuff and exit if it's past 55 minutes of session end.
+		    if (now > sessionEnd)
+		    {
+		        foreach (var tag in new[] { "BoxHigh","BoxLow","EntryLine","StopLine","TargetLine" })
+		            RemoveDrawObject(tag);
+		        return;
+		    }
+			
+			
 			
 			
 			// 2) Five minutes after session open -> define the box
@@ -155,7 +178,16 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Now draw the horizontal lines on your chart
 				Draw.HorizontalLine(this, "BoxHigh", BoxHigh, Brushes.Red, DashStyleHelper.Solid, 2, true);
 				Draw.HorizontalLine(this, "BoxLow", BoxLow, Brushes.Red, DashStyleHelper.Solid, 2, true);
+				
+				/*
+				Draw.Rectangle(this, "ORBShade" + CurrentBar, false, SessionOpen.AddMinutes(5), BoxHigh, Time[0].AddHours(3), BoxLow,  // extend out into future (3 hours is plenty)
+			    Brushes.Red.ChangeOpacity(15), Brushes.Transparent, 1);
+				*/
 			}
+			
+				// To clean up alerts/print statements between different candle iterations
+				Alert("New Iteration", Priority.Low, "New iteration", "", 1, Brushes.Gray, Brushes.Transparent);
+				Print("--------------------------------------------------------------");
 			
 			// 3) Check if the candles meet the conditions for a valid breakout ONLY after first 5-min has been drawn out
 			if(!SessionTradeTaken && BoxHeight > 0) // If box height > 0 then it has already been drawn out
@@ -163,21 +195,17 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Step 1, breakout detection. most efficient step first before checking for more.
 				bool longBreakout = Close[0] > BoxHigh;
 				bool shortBreakout = Close[0] < BoxLow;
-				if(longBreakout)
-					Print("Breakout LONG at " + now);
-				else if(shortBreakout)
-					Print("Breakout SHORT at " + now);
-				else
-					return; // to not continue any other logic since neither have happened. efficiency
+				if (!longBreakout && !shortBreakout)
+            		return; // no breakout so keep waiting.
 				
 				// Step 2, check if the box size is valid or else skip the trade
 				double minBox = IsLondonSession ? MinBoxLondon : MinBoxNewYork; // find min box required based on which session it is
 				if(BoxHeight < minBox || BoxHeight > MaxBox) 
 				{
-					Print($"✖️ BoxHeight {BoxHeight:F2} invalid (needs {minBox:F2}–{MaxBox:F2})");
+					Print($"{Time[0]:t} ✖️ BoxHeight {BoxHeight:F2} invalid (needs {minBox:F2}–{MaxBox:F2})");
 					return; // skip trade if box height is invalid
 				}
-				Print($"✔️ BoxHeight OK: {BoxHeight:F2}");
+				Print($"{Time[0]:t} ✔️ BoxHeight OK: {BoxHeight:F2}");
 				
 				// Step 3, confirm the EMAs
 				double ema9 = EMA(Closes[0], 9)[0];
@@ -188,16 +216,16 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Skip trades if EMAs do not fit the rules
 				if(longBreakout && !emaOKLong) 
 				{
-					Print($"✖️ EMA misaligned LONG: Close={Close[0]:F2}, 9EMA={ema9:F2}, 21EMA={ema21:F2}");
+					Print($"{Time[0]:t} ✖️ EMA misaligned LONG: Close={Close[0]:F2}, 9EMA={ema9:F2}, 21EMA={ema21:F2}");
                     return;
 				}
 				
 				if (shortBreakout && !emaOKShort)
                 {
-                    Print($"✖️ EMA misaligned SHORT: Close={Close[0]:F2}, 9EMA={ema9:F2}, 21EMA={ema21:F2}");
+                    Print($"{Time[0]:t} ✖️ EMA misaligned SHORT: Close={Close[0]:F2}, 9EMA={ema9:F2}, 21EMA={ema21:F2}");
                     return;
                 }
-                Print("✔️ EMA alignment OK"); // EMA fit rules so continue
+                Print("{Time[0]:t} ✔️ EMA alignment OK"); // EMA fit rules so continue
 				
 				
 				// Step 4, volume filter with alert
@@ -210,13 +238,23 @@ namespace NinjaTrader.NinjaScript.Strategies
 				
 				if(Volume[0] < volThresh) 
 				{
-					Print($"⚠️ Low volume: {Volume[0]} vs threshold {volThresh:F0}");
+					Print($"{Time[0]:t} ⚠️ Low volume: {Volume[0]} vs threshold {volThresh:F0}");
 					Alert("LowVol", Priority.High, "Low volume breakout", "Alert2.wav", 0, Brushes.Orange, Brushes.Black);
+					
+					/*
+					Dispatcher?.Invoke(() =>
+ 			MessageBox.Show(
+            $"Low volume breakout at {Time[0]:t}\nVol={Volume[0]} vs threshold {volThresh:F0}",
+            "ORB Alert — Low Volume",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning
+        ));
+					*/
 				}
 				
 				else 
 				{
-					Print($"✔️ Volume OK: {Volume[0]} vs {volThresh:F0}");
+					Print($"{Time[0]:t} ✔️ Volume OK: {Volume[0]} vs {volThresh:F0}");
 				}
 				
 				
@@ -224,27 +262,51 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Find target profit depending on if it's a long or short
 				double target = longBreakout ? Close[0] + Math.Min(BoxHeight * 2, 4) : Close[0] - Math.Min(BoxHeight * 2, 4);
 				
-				if(longBreakout && PrevDayHigh - target <= 2)
+				if(longBreakout && PrevDayHigh - target <= 2 || shortBreakout && target - PrevDayLow <= 2)
 				{
-					Print($"⚠️ TP {target:F2} within 2 of yesterday’s HIGH {PrevDayHigh:F2}");
-            		Alert("SRHigh", Priority.Medium, "TP near prior-day HIGH", "", 0, Brushes.Yellow, Brushes.Black);
+					Print("{Time[0]:t} ⚠️ TP near prior H/L");
+            		Alert("SRNear", Priority.Medium, "TP vs prior-day S/R", "", 1, Brushes.Yellow, Brushes.Black);
 				}
 				
-				else if (shortBreakout && target - PrevDayLow <= 2)
-		        {
-		            Print($"⚠️ TP {target:F2} within 2 of yesterday’s LOW {PrevDayLow:F2}");
-		            Alert("SRLow", Priority.Medium, "TP near prior-day LOW",  "", 0, Brushes.Yellow, Brushes.Black);
-		        }
 		        else
 				{
-		            Print("✔️ Context OK");
+		            Print("{Time[0]:t} ✔️ Context OK");
 				}
-					
+				
+				
+				// Step 6, draw discretionary bracket, wait for real fill to lock trading ability
+				double entryPrice = Close[0];
+				double stopPrice  = longBreakout ? BoxLow - 0.25 : BoxHigh + 0.25;
+				double targetPrice = target;
+				
+				// Draw the full width lines to use for manual bracket placement
+				Draw.HorizontalLine(this, "EntryLine", entryPrice, Brushes.Lime, DashStyleHelper.Solid, 3, true);
+				Draw.HorizontalLine(this, "StopLine",   stopPrice,    Brushes.Orange,   DashStyleHelper.Solid, 3, true);
+				Draw.HorizontalLine(this, "TargetLine", targetPrice,  Brushes.LimeGreen,DashStyleHelper.Solid, 3, true);
+
+				Print($"{Time[0]:t} 🥊 Bracket ready: Entry={entryPrice:F2}, SL={stopPrice:F2}, TP={targetPrice:F2}");
+				Alert("BracketReady", Priority.High, 
+				      "ORB bracket drawn – click LMT then entry line", 
+				      "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
+				
+	
+
 				
 			}
 			
 			
 		}
+		
+		// Lock yourself out from further trades once you actually fill
+		protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity,
+		    MarketPosition marketPosition, string orderId, DateTime time)
+			{
+			    if (marketPosition != MarketPosition.Flat) // If not flat, you took long or short
+			    {
+			        SessionTradeTaken = true;
+			        Print($"✅ Fill detected at {price:F2} ({marketPosition}), locking out further brackets for this session.");
+			    }
+			}
 
 		#region Properties
 		[NinjaScriptProperty]
