@@ -102,10 +102,10 @@ namespace NinjaTrader.NinjaScript.Strategies
             		RemoveDrawObject("PD_Low");
 					// Previous day high
             		Draw.HorizontalLine(this, "PD_High", PrevDayHigh, Brushes.DodgerBlue, DashStyleHelper.Dash, 2, true);
-					//Draw.Text(this, "PD_High_Label", "Previous Day High", 0, PrevDayHigh + TickSize * 10, Brushes.DodgerBlue);
+					Draw.Text(this, "PD_High_Label", "Previous Day High", 0, PrevDayHigh + TickSize * 10, Brushes.DodgerBlue);
 					// Below is for previous day low
             		Draw.HorizontalLine(this, "PD_Low", PrevDayLow,  Brushes.MediumBlue, DashStyleHelper.Dash, 2, true);
-					//Draw.Text(this, "PD_Low_Label", "Previous Day Low", 0, PrevDayLow - TickSize * 10, Brushes.MediumBlue);
+					Draw.Text(this, "PD_Low_Label", "Previous Day Low", 0, PrevDayLow - TickSize * 10, Brushes.MediumBlue);
 					
 				}
 				return;
@@ -177,7 +177,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 		    // Clear stuff and exit if it's past 55 minutes of session end.
 		    if (now > sessionEnd)
 		    {
-		        foreach (var tag in new[] { "BoxHigh","BoxLow","EntryLine","StopLine","TargetLine" })
+		        foreach (var tag in new[] { "BoxHigh","BoxLow","EntryLine","StopLine","TargetLine", "TP_Label", "SL_Label" })
 		            RemoveDrawObject(tag);
 		        return;
 		    }
@@ -331,7 +331,6 @@ namespace NinjaTrader.NinjaScript.Strategies
 					
 				}
 				
-	
 
 				
 			}
