@@ -35,6 +35,9 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private DateTime SessionOpen;
 		private bool IsLondonSession;
 		private double PrevDayHigh, PrevDayLow;
+		private bool basicFiltersPassed; // breakout + boxSize + EMA
+		private bool allFiltersPassed; // basicFiltersPassed + volume + S/R
+		private bool bracketLocked; // freeze the bracked when allFiltersPassed
 
 
 		protected override void OnStateChange()
@@ -76,10 +79,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 				SessionTradeTaken					= false;
 				SessionOpen						= DateTime.Parse("00:00", System.Globalization.CultureInfo.InvariantCulture);
 				IsLondonSession					= false;
+				basicFiltersPassed = allFiltersPassed = bracketLocked = false;
 			}
 			else if (State == State.Configure)
 			{
-				AddDataSeries(BarsPeriodType.Day, 1);
+				AddDataSeries(BarsPeriodType.Day, 1); // "second" series
+				// Tells strategy to subscribe to 2nd series of data: 1-minute bars. 
+				AddDataSeries(BarsPeriodType.Minute, 1); // "Third series"
 			}
 		}
 
@@ -94,8 +100,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 					PrevDayLow  = Lows[1][1];
             		RemoveDrawObject("PD_High");
             		RemoveDrawObject("PD_Low");
-            		Draw.HorizontalLine(this, "PD_High", PrevDayHigh, Brushes.Blue, DashStyleHelper.Dash, 2, true);
-            		Draw.HorizontalLine(this, "PD_Low", PrevDayLow,  Brushes.Blue, DashStyleHelper.Dash, 2, true);
+					// Previous day high
+            		Draw.HorizontalLine(this, "PD_High", PrevDayHigh, Brushes.DodgerBlue, DashStyleHelper.Dash, 2, true);
+					//Draw.Text(this, "PD_High_Label", "Previous Day High", 0, PrevDayHigh + TickSize * 10, Brushes.DodgerBlue);
+					// Below is for previous day low
+            		Draw.HorizontalLine(this, "PD_Low", PrevDayLow,  Brushes.MediumBlue, DashStyleHelper.Dash, 2, true);
+					//Draw.Text(this, "PD_Low_Label", "Previous Day Low", 0, PrevDayLow - TickSize * 10, Brushes.MediumBlue);
+					
 				}
 				return;
 			}
@@ -104,6 +115,14 @@ namespace NinjaTrader.NinjaScript.Strategies
 			// Dont start any logic until you've got at least 20 bars
 			if (BarsInProgress != 0 || CurrentBar < BarsRequiredToTrade) 
 				return;
+			
+			// make sure auxiliary series have enough history
+			if (BarsArray[2].Count < 9)   // 1-minute data for EMA
+			    return;
+			
+			// need 6 bars for Volume[5]
+			if (CurrentBar < 6)
+			    return;
 
 			// saves the current time on 'now' variable on every bar update
 			DateTime now = Time[0];
@@ -122,6 +141,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				BoxHigh = 0;
 				BoxLow = 0;
 				BoxHeight = 0;
+				basicFiltersPassed = allFiltersPassed = bracketLocked = false;
 				// remove everything to clean up working space and prevent spam when backtesting
         	foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
             RemoveDrawObject(tag);
@@ -138,6 +158,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 		        BoxHigh = 0;
 		        BoxLow  = 0;
 				BoxHeight = 0;
+				basicFiltersPassed = allFiltersPassed = bracketLocked = false;
 		        // remove everything to clean up working space and prevent spam when backtesting
         		foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
             	RemoveDrawObject(tag);
@@ -176,8 +197,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Print($"Drawing ORB box at {now}  High={BoxHigh:F2} Low={BoxLow:F2}");
 				
 				// Now draw the horizontal lines on your chart
-				Draw.HorizontalLine(this, "BoxHigh", BoxHigh, Brushes.Red, DashStyleHelper.Solid, 2, true);
-				Draw.HorizontalLine(this, "BoxLow", BoxLow, Brushes.Red, DashStyleHelper.Solid, 2, true);
+				Draw.HorizontalLine(this, "BoxHigh", BoxHigh, Brushes.Crimson, DashStyleHelper.Solid, 2, true);
+				Draw.HorizontalLine(this, "BoxLow", BoxLow, Brushes.Crimson, DashStyleHelper.Solid, 2, true);
 				
 				/*
 				Draw.Rectangle(this, "ORBShade" + CurrentBar, false, SessionOpen.AddMinutes(5), BoxHigh, Time[0].AddHours(3), BoxLow,  // extend out into future (3 hours is plenty)
@@ -207,9 +228,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 				}
 				Print($"{Time[0]:t} ✔️ BoxHeight OK: {BoxHeight:F2}");
 				
+				
 				// Step 3, confirm the EMAs
-				double ema9 = EMA(Closes[0], 9)[0];
-				double ema21 = EMA(Closes[0], 21)[0];
+				double ema9 = EMA(Closes[2], 9)[0]; // Syntax: Closes[int barSeriesIndex][int barsAgo]
+				double ema21 = EMA(Closes[2], 21)[0]; // barSeriesIndex = 2 → your 1-min series
 				bool emaOKLong = Close[0] > ema9 && ema9 > ema21;
 				bool emaOKShort = Close[0] < ema9 && ema9 < ema21;
 				
@@ -226,9 +248,12 @@ namespace NinjaTrader.NinjaScript.Strategies
                     return;
                 }
                 Print("{Time[0]:t} ✔️ EMA alignment OK"); // EMA fit rules so continue
+				basicFiltersPassed = true; // after checking EMA
 				
 				
 				// Step 4, volume filter with alert
+				if(CurrentBar < 6)
+					return;
 				double volAvg = 0;
 				for (int i = 1; i <=5; i++) {
 					volAvg += Volume[i];
@@ -271,23 +296,40 @@ namespace NinjaTrader.NinjaScript.Strategies
 		        else
 				{
 		            Print("{Time[0]:t} ✔️ Context OK");
+					allFiltersPassed = true;
 				}
 				
 				
+				if(basicFiltersPassed && !bracketLocked) 
+				{
 				// Step 6, draw discretionary bracket, wait for real fill to lock trading ability
 				double entryPrice = Close[0];
 				double stopPrice  = longBreakout ? BoxLow - 0.25 : BoxHigh + 0.25;
 				double targetPrice = target;
 				
 				// Draw the full width lines to use for manual bracket placement
-				Draw.HorizontalLine(this, "EntryLine", entryPrice, Brushes.Lime, DashStyleHelper.Solid, 3, true);
-				Draw.HorizontalLine(this, "StopLine",   stopPrice,    Brushes.Orange,   DashStyleHelper.Solid, 3, true);
-				Draw.HorizontalLine(this, "TargetLine", targetPrice,  Brushes.LimeGreen,DashStyleHelper.Solid, 3, true);
+				Draw.HorizontalLine(this, "EntryLine", entryPrice, Brushes.LimeGreen, DashStyleHelper.Solid, 3, true);
+				Draw.HorizontalLine(this, "StopLine",   stopPrice,    Brushes.OrangeRed,   DashStyleHelper.Solid, 3, true);
+				Draw.Text(this, "SL_Label", "Stop Loss", 0, stopPrice - TickSize * 10, Brushes.OrangeRed);
+				Draw.HorizontalLine(this, "TargetLine", targetPrice,  Brushes.Lime, DashStyleHelper.Solid, 3, true);
+				Draw.Text(this, "TP_Label", "Take Profit", 0, targetPrice + TickSize * 10, Brushes.Lime);
 
 				Print($"{Time[0]:t} 🥊 Bracket ready: Entry={entryPrice:F2}, SL={stopPrice:F2}, TP={targetPrice:F2}");
 				Alert("BracketReady", Priority.High, 
 				      "ORB bracket drawn – click LMT then entry line", 
 				      "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
+					
+					// Lock bracket so it doesn't move if all filters are met. No need for any more discretion since all signals are here.
+					if(allFiltersPassed) {
+						bracketLocked = true;
+						Print($"{Time[0]:HH:mm} ✅ All filters met—bracket locked");
+				        Print($"{Time[0]:HH:mm} ----------------------------------------------------");
+				        Alert("BracketLock", Priority.High, 
+				              "ORB bracket locked—ready to trade", 
+				              "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
+					}
+					
+				}
 				
 	
 
