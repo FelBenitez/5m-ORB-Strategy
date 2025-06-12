@@ -38,6 +38,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 		private bool basicFiltersPassed; // breakout + boxSize + EMA
 		private bool allFiltersPassed; // basicFiltersPassed + volume + S/R
 		private bool bracketLocked; // freeze the bracked when allFiltersPassed
+		private bool breakEvenMoved;
+		// Store the actual prices of your filled bracket
+		private double filledEntryPrice;
+		private double filledStopPrice;
 
 
 		protected override void OnStateChange()
@@ -80,6 +84,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				SessionOpen						= DateTime.Parse("00:00", System.Globalization.CultureInfo.InvariantCulture);
 				IsLondonSession					= false;
 				basicFiltersPassed = allFiltersPassed = bracketLocked = false;
+				breakEvenMoved = false;
 			}
 			else if (State == State.Configure)
 			{
@@ -136,6 +141,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				SessionOpen = now;
 				IsLondonSession = true;
 				SessionTradeTaken = false; // So it resets in case it's still true from previous session
+				breakEvenMoved = false;
 				
 				// Clear any old drawings
 				BoxHigh = 0;
@@ -155,6 +161,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				SessionOpen        = now;
 		        IsLondonSession    = false;
 		        SessionTradeTaken  = false; // So it resets in case it's still true from previous session
+				breakEvenMoved = false;
 		        BoxHigh = 0;
 		        BoxLow  = 0;
 				BoxHeight = 0;
@@ -211,7 +218,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Print("--------------------------------------------------------------");
 			
 			// 3) Check if the candles meet the conditions for a valid breakout ONLY after first 5-min has been drawn out
-			if(!SessionTradeTaken && BoxHeight > 0) // If box height > 0 then it has already been drawn out
+			// Keep checking as long as trade hasn't taken place. If trade is taken, bracket code and calculations don't run
+			if(!SessionTradeTaken && BoxHeight > 0) 
 			{
 				// Step 1, breakout detection. most efficient step first before checking for more.
 				bool longBreakout = Close[0] > BoxHigh;
@@ -300,8 +308,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 				}
 				
 				
-				if(basicFiltersPassed && !bracketLocked) 
-				{
+				//if(basicFiltersPassed && !bracketLocked) 
+				//{
 				// Step 6, draw discretionary bracket, wait for real fill to lock trading ability
 				double entryPrice = Close[0];
 				double stopPrice  = longBreakout ? BoxLow - 0.25 : BoxHigh + 0.25;
@@ -313,12 +321,21 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Draw.Text(this, "SL_Label", "Stop Loss", 0, stopPrice - TickSize * 10, Brushes.OrangeRed);
 				Draw.HorizontalLine(this, "TargetLine", targetPrice,  Brushes.Lime, DashStyleHelper.Solid, 3, true);
 				Draw.Text(this, "TP_Label", "Take Profit", 0, targetPrice + TickSize * 10, Brushes.Lime);
+					
+				
+				filledEntryPrice = entryPrice;
+				filledStopPrice = stopPrice;
+			
+					
+					
+					
 
 				Print($"{Time[0]:t} 🥊 Bracket ready: Entry={entryPrice:F2}, SL={stopPrice:F2}, TP={targetPrice:F2}");
 				Alert("BracketReady", Priority.High, 
 				      "ORB bracket drawn – click LMT then entry line", 
 				      "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
 					
+				/*
 					// Lock bracket so it doesn't move if all filters are met. No need for any more discretion since all signals are here.
 					if(allFiltersPassed) {
 						bracketLocked = true;
@@ -328,11 +345,31 @@ namespace NinjaTrader.NinjaScript.Strategies
 				              "ORB bracket locked—ready to trade", 
 				              "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
 					}
+				*/
 					
-				}
+				//}
+				
+				
+				
 				
 
 				
+			}
+			
+			
+			// Step 7, break-even alert once you've filled and locked. Will also stop updating bracket since trade filled
+			if(SessionTradeTaken && bracketLocked && !breakEvenMoved) {
+				double risk         = Math.Abs(filledEntryPrice - filledStopPrice);
+		        double beTriggerLong  = filledEntryPrice + 1.5 * risk;
+		        double beTriggerShort = filledEntryPrice - 1.5 * risk;
+		
+		        if (Position.MarketPosition == MarketPosition.Long  && Close[0] >= beTriggerLong ||
+		            Position.MarketPosition == MarketPosition.Short && Close[0] <= beTriggerShort)
+		        {
+		            Print($"{now:t} ⚙ +1.5R hit → move SL to BE");
+		            Alert("MoveBE", Priority.High, "Move stop to breakeven", "Alert4.wav", 0, Brushes.White, Brushes.DarkBlue);
+		            breakEvenMoved = true;
+		        }
 			}
 			
 			
@@ -342,9 +379,11 @@ namespace NinjaTrader.NinjaScript.Strategies
 		protected override void OnExecutionUpdate(Execution execution, string executionId, double price, int quantity,
 		    MarketPosition marketPosition, string orderId, DateTime time)
 			{
-			    if (marketPosition != MarketPosition.Flat) // If not flat, you took long or short
+				// If not flat, you took long or short
+			    if (execution.Instrument == Instrument && !SessionTradeTaken && marketPosition != MarketPosition.Flat)
 			    {
 			        SessionTradeTaken = true;
+					breakEvenMoved = false; // reset for this trade
 			        Print($"✅ Fill detected at {price:F2} ({marketPosition}), locking out further brackets for this session.");
 			    }
 			}
