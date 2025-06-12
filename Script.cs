@@ -96,6 +96,17 @@ namespace NinjaTrader.NinjaScript.Strategies
 
 		protected override void OnBarUpdate()
 		{
+			if(BarsInProgress == 0 && !SessionTradeTaken && PositionAccount.MarketPosition != MarketPosition.Flat)
+			{
+				SessionTradeTaken = true;
+				bracketLocked     = true;          // freeze Entry/SL/TP lines
+        		breakEvenMoved    = false;
+				
+				 filledEntryPrice  = PositionAccount.AveragePrice;
+        		// filledStopPrice was captured when we drew the bracket
+        		Print($"{Time[0]:t} 🟢 Manual fill detected — bracket locked");
+			}
+			
 			// Step 0, handle daily series for prior H/L
 			if(BarsInProgress == 1) 
 			{
@@ -103,8 +114,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 				{
 					PrevDayHigh = Highs[1][1];
 					PrevDayLow  = Lows[1][1];
+					
             		RemoveDrawObject("PD_High");
             		RemoveDrawObject("PD_Low");
+					
 					// Previous day high
             		Draw.HorizontalLine(this, "PD_High", PrevDayHigh, Brushes.DodgerBlue, DashStyleHelper.Dash, 2, true);
 					Draw.Text(this, "PD_High_Label", "Previous Day High", 0, PrevDayHigh + TickSize * 10, Brushes.DodgerBlue);
@@ -122,11 +135,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				return;
 			
 			// make sure auxiliary series have enough history
-			if (BarsArray[2].Count < 9)   // 1-minute data for EMA
-			    return;
-			
-			// need 6 bars for Volume[5]
-			if (CurrentBar < 6)
+			if (BarsArray[2].Count < 9 || CurrentBar < 6)   // 1-minute data for EMA, Volume[5]
 			    return;
 
 			// saves the current time on 'now' variable on every bar update
@@ -148,9 +157,10 @@ namespace NinjaTrader.NinjaScript.Strategies
 				BoxLow = 0;
 				BoxHeight = 0;
 				basicFiltersPassed = allFiltersPassed = bracketLocked = false;
+				
 				// remove everything to clean up working space and prevent spam when backtesting
-        	foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
-            RemoveDrawObject(tag);
+	        	foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
+	            RemoveDrawObject(tag);
 			}
 			
 			
@@ -189,9 +199,6 @@ namespace NinjaTrader.NinjaScript.Strategies
 		        return;
 		    }
 			
-			
-			
-			
 			// 2) Five minutes after session open -> define the box
 			if(SessionOpen != default(DateTime) && now == SessionOpen.AddMinutes(5)) 
 			{
@@ -206,11 +213,6 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Now draw the horizontal lines on your chart
 				Draw.HorizontalLine(this, "BoxHigh", BoxHigh, Brushes.Crimson, DashStyleHelper.Solid, 2, true);
 				Draw.HorizontalLine(this, "BoxLow", BoxLow, Brushes.Crimson, DashStyleHelper.Solid, 2, true);
-				
-				/*
-				Draw.Rectangle(this, "ORBShade" + CurrentBar, false, SessionOpen.AddMinutes(5), BoxHigh, Time[0].AddHours(3), BoxLow,  // extend out into future (3 hours is plenty)
-			    Brushes.Red.ChangeOpacity(15), Brushes.Transparent, 1);
-				*/
 			}
 			
 				// To clean up alerts/print statements between different candle iterations
@@ -273,16 +275,6 @@ namespace NinjaTrader.NinjaScript.Strategies
 				{
 					Print($"{Time[0]:t} ⚠️ Low volume: {Volume[0]} vs threshold {volThresh:F0}");
 					Alert("LowVol", Priority.High, "Low volume breakout", "Alert2.wav", 0, Brushes.Orange, Brushes.Black);
-					
-					/*
-					Dispatcher?.Invoke(() =>
- 			MessageBox.Show(
-            $"Low volume breakout at {Time[0]:t}\nVol={Volume[0]} vs threshold {volThresh:F0}",
-            "ORB Alert — Low Volume",
-            MessageBoxButton.OK,
-            MessageBoxImage.Warning
-        ));
-					*/
 				}
 				
 				else 
@@ -322,44 +314,24 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Draw.HorizontalLine(this, "TargetLine", targetPrice,  Brushes.Lime, DashStyleHelper.Solid, 3, true);
 				Draw.Text(this, "TP_Label", "Take Profit", 0, targetPrice + TickSize * 10, Brushes.Lime);
 					
+				// predicted entry price if you pulled it off perfectly
+				filledEntryPrice = entryPrice; // should be updated when order is placed
 				
-				filledEntryPrice = entryPrice;
 				filledStopPrice = stopPrice;
-			
-					
-					
-					
 
 				Print($"{Time[0]:t} 🥊 Bracket ready: Entry={entryPrice:F2}, SL={stopPrice:F2}, TP={targetPrice:F2}");
 				Alert("BracketReady", Priority.High, 
 				      "ORB bracket drawn – click LMT then entry line", 
 				      "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
-					
-				/*
-					// Lock bracket so it doesn't move if all filters are met. No need for any more discretion since all signals are here.
-					if(allFiltersPassed) {
-						bracketLocked = true;
-						Print($"{Time[0]:HH:mm} ✅ All filters met—bracket locked");
-				        Print($"{Time[0]:HH:mm} ----------------------------------------------------");
-				        Alert("BracketLock", Priority.High, 
-				              "ORB bracket locked—ready to trade", 
-				              "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
-					}
-				*/
-					
-				//}
-				
-				
-				
-				
-
-				
 			}
 			
 			
 			// Step 7, break-even alert once you've filled and locked. Will also stop updating bracket since trade filled
+			// Doing it on 5 minute bar close as researched which is best for now. 
 			if(SessionTradeTaken && bracketLocked && !breakEvenMoved) {
 				double risk         = Math.Abs(filledEntryPrice - filledStopPrice);
+				// Uses the actual filledEntryPrice captured when the order was executed
+				// Computes risk based on when you entered
 		        double beTriggerLong  = filledEntryPrice + 1.5 * risk;
 		        double beTriggerShort = filledEntryPrice - 1.5 * risk;
 		
@@ -368,6 +340,12 @@ namespace NinjaTrader.NinjaScript.Strategies
 		        {
 		            Print($"{now:t} ⚙ +1.5R hit → move SL to BE");
 		            Alert("MoveBE", Priority.High, "Move stop to breakeven", "Alert4.wav", 0, Brushes.White, Brushes.DarkBlue);
+					
+					// Redraw StopLine at breakeven
+			        RemoveDrawObject("StopLine");  // Remove old SL
+			        Draw.HorizontalLine(this, "StopLine", filledEntryPrice, Brushes.OrangeRed, DashStyleHelper.Solid, 3, true);
+			        Draw.Text(this, "SL_Label", "Stop Loss (BE)", 0, filledEntryPrice - TickSize * 10, Brushes.OrangeRed);
+					
 		            breakEvenMoved = true;
 		        }
 			}
