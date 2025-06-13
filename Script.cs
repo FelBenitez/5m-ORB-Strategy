@@ -161,6 +161,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// remove everything to clean up working space and prevent spam when backtesting
 	        	foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
 	            RemoveDrawObject(tag);
+				PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert4.wav");
 			}
 			
 			
@@ -179,6 +180,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 		        // remove everything to clean up working space and prevent spam when backtesting
         		foreach (var tag in new[] { "BoxHigh", "BoxLow", "EntryLine", "StopLine", "TargetLine" })
             	RemoveDrawObject(tag);
+				PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert4.wav");
 			}
 			
 			
@@ -209,6 +211,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				BoxHeight = BoxHigh - BoxLow; // Calculates box height only after 5-min candle has occurred
 				
 				Print($"Drawing ORB box at {now}  High={BoxHigh:F2} Low={BoxLow:F2}");
+				PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert2.wav");
 				
 				// Now draw the horizontal lines on your chart
 				Draw.HorizontalLine(this, "BoxHigh", BoxHigh, Brushes.Crimson, DashStyleHelper.Solid, 2, true);
@@ -323,6 +326,7 @@ namespace NinjaTrader.NinjaScript.Strategies
 				Alert("BracketReady", Priority.High, 
 				      "ORB bracket drawn – click LMT then entry line", 
 				      "Alert3.wav", 1, Brushes.LimeGreen, Brushes.Black);
+				PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert1.wav");
 			}
 			
 			
@@ -340,6 +344,8 @@ namespace NinjaTrader.NinjaScript.Strategies
 		        {
 		            Print($"{now:t} ⚙ +1.5R hit → move SL to BE");
 		            Alert("MoveBE", Priority.High, "Move stop to breakeven", "Alert4.wav", 0, Brushes.White, Brushes.DarkBlue);
+					PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert1.wav");
+					PlaySound(NinjaTrader.Core.Globals.InstallDir + @"\sounds\Alert1.wav");
 					
 					// Redraw StopLine at breakeven
 			        RemoveDrawObject("StopLine");  // Remove old SL
