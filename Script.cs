@@ -289,10 +289,13 @@ namespace NinjaTrader.NinjaScript.Strategies
 				// Step 5, provide support/resistance context alert about previous day high/low
 				// Find target profit depending on if it's a long or short
 				double target = longBreakout ? Close[0] + Math.Min(BoxHeight * 2, 4) : Close[0] - Math.Min(BoxHeight * 2, 4);
-				
-				if(longBreakout && PrevDayHigh - target <= 2 || shortBreakout && target - PrevDayLow <= 2)
+				// Checks if near any major level, regardless of direction
+				double distHigh = Math.Abs(target - PrevDayHigh);
+				double distLow  = Math.Abs(target - PrevDayLow);
+				if(distHigh <= 2 || distLow <= 2)
 				{
-					Print("{Time[0]:t} ⚠️ TP near prior H/L");
+					double nearest = Math.Min(distHigh, distLow);
+					Print($"{Time[0]:t} ⚠️ TP near prior H/L by {nearest:F2} points");
             		Alert("SRNear", Priority.Medium, "TP vs prior-day S/R", "", 1, Brushes.Yellow, Brushes.Black);
 				}
 				
